@@ -29,22 +29,21 @@ initial_state(Nick, GUIAtom, ServerAtom) ->
 % Join channel
 handle(St, {join, Channel}) ->
     % TODO: Implement this function
-    genserver:request(St#client_st.server, {join, Channel, St}) ,
-    
+    genserver:request(St#client_st.server, {join, Channel, self(), St#client_st.gui}) ,
     {reply, ok, St};
     % {reply, {error, not_implemented, "join not implemented"}, St} ;
 
 % Leave channel
 handle(St, {leave, Channel}) ->
     % TODO: Implement this function
-    genserver:request(St#client_st.server, {leave, Channel, self()}) ,
-    {reply, ok, St};
+    genserver:request(St#client_st.server, {leave, Channel, St}) ,
+    {reply, ok, self()};
     % {reply, {error, not_implemented, "leave not implemented"}, St} ;
 
 % Sending message (from GUI, to channel)
 handle(St, {message_send, Channel, Msg}) ->
     % TODO: Implement this function
-    genserver:request(St#client_st.server, {message_send, Channel, Msg}) ,
+    genserver:request(St#client_st.server, {message_send, Channel, Msg, St#client_st.nick, self()}) ,
     {reply, ok, St};
     % {reply, {error, not_implemented, "message sending not implemented"}, St} ;
 
