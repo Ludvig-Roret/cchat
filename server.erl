@@ -2,7 +2,8 @@
 -export([start/1,stop/1]).
 
 -record(server_st,{
-   channels % Client Pids to connect channels to clients
+   channels, % Client Pids to connect channels to clients
+   nicks
 }).
 
 % Start a new server process with the given name
@@ -24,7 +25,8 @@ stop(ServerAtom) ->
 
 initial_state() ->
     #server_st{
-        channels = #{}
+        channels = #{},
+        nicks = #{}
     }.
 
 handle(St, {join, Channel, ClientPid, Gui}) ->
@@ -45,4 +47,21 @@ handle(St, {message_send, Channel, Msg, Nick, ClientPid}) ->
     lists:foreach(fun({Pid, _}) -> 
         spawn(fun() -> genserver:request(Pid, {message_receive, Channel, Nick, Msg}) end)
     end, TargetPids),
-    {reply, ok, St}.
+    {reply, ok, St};
+
+
+%  Distinction assignment
+
+handle(St, {nick, NewNick, ClientPid}) ->
+    CurrentNicks = maps:get(NewNick, St#server_st.nicks, []),
+    NewNicks = #{},
+    if
+        length(CurrentNicks) >= 1 ->
+            {reply, {error, nick_taken, "That nick is already in use"}, St};
+
+        true ->
+            NewNicks = maps:put(NewNick, [ClientPid | CurrentNicks], St#server_st.nicks)
+    end,
+    {reply, ok, St#server_st{nicks = NewNicks}}.
+    
+    
