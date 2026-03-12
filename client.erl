@@ -33,26 +33,29 @@ handle(St, {join, Channel}) ->
     % TODO: Implement this function
     case whereis(St#client_st.server) of
         undefined ->
-            {reply, {error, server_not_reached, "Server doesn't exist"}, St};
+            {reply, {error, server_not_reached, "Server doesn't exist"}, St}; % If the server doesnt exist, error
         _ -> 
-    
-    case lists:member(Channel, St#client_st.channels) of
-        true -> {reply, {error, user_already_joined, "User already joined"}, St};
-        false ->
-            try genserver:request(St#client_st.server, {join, Channel, self()}) of
-                ok ->
-                    NewState = St#client_st{channels = [Channel | St#client_st.channels]}, 
-                    {reply, ok, NewState}
-            catch
-                throw : timeout_error -> {reply, {error, server_not_reached, "Server not responding"}, St}
+            case lists:member(Channel, St#client_st.channels) of
+                true -> {reply, {error, user_already_joined, "User already joined"}, St}; % If user is already in the channels user list
+                false ->
+                    % Try to join on the serverside, if it works add Channel to the clients channel list,
+                    % otherwise throw error
+                    try genserver:request(St#client_st.server, {join, Channel, self(), St#client_st.nick}) of
+                        ok ->
+                            NewState = St#client_st{channels = [Channel | St#client_st.channels]}, 
+                            {reply, ok, NewState}
+                    catch
+                        throw : timeout_error -> {reply, {error, server_not_reached, "Server not responding"}, St}
+                    end
             end
-        end
     end;
 
 % Leave channel
 handle(St, {leave, Channel}) ->
     % TODO: Implement this function
 
+    % Check if the channel is in the clients channel list, if yes leave on channel level
+    % otherwise reply error
     case lists:member(Channel, St#client_st.channels) of
         true ->            
             genserver:request(list_to_atom(Channel), {leave, self()}) ,
@@ -67,6 +70,10 @@ handle(St, {leave, Channel}) ->
 % Sending message (from GUI, to channel)
 handle(St, {message_send, Channel, Msg}) ->
     % TODO: Implement this function
+
+    % Check if the channel exists: if not -> error, 
+    % otherwise check if client is joined in the given channel: yes -> send message on the channel level,
+    % otherwise -> error
     case whereis(list_to_atom(Channel)) of
         undefined ->
              {reply, {error, server_not_reached, "Channel isn't created"}, St};
@@ -80,14 +87,21 @@ handle(St, {message_send, Channel, Msg}) ->
                     end;
                 false ->
                     {reply, {error, user_not_joined, "User not joined in channel"}, St}
-        end
+            end
     end;
 
 % This case is only relevant for the distinction assignment!
 % Change nick (no check, local only)
 handle(St, {nick, NewNick}) ->
-    genserver:request(St#client_st.server, {nick, NewNick, self()}),
-    {reply, ok, St#client_st{nick = NewNick}} ;
+
+    % Try change nick on the server side, if it returns an error -> error
+    % otherwise -> Change nick.
+    case genserver:request(St#client_st.server, {nick, NewNick, St#client_st.nick}) of
+        ok ->
+            {reply, ok, St#client_st{nick = NewNick}};
+        _ ->
+            {reply, {error, nick_taken, "Nick already taken"}, St}
+    end;
 
 % ---------------------------------------------------------------------------
 % The cases below do not need to be changed...
