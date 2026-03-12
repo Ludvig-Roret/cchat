@@ -24,14 +24,10 @@ start(ServerAtom) ->
 stop(ServerAtom) ->
     % TODO Implement function
     % Return ok
-    Channels = active_channels(ServerAtom),
+    Channels = genserver:request(ServerAtom, active_channels),
     lists:foreach(fun({_, Pid}) -> genserver:stop(Pid) end, Channels),
     genserver:stop(ServerAtom),
     ok.
-
-active_channels(St) ->
-    Channels = St#server_st.channels,
-    Channels.
 
 initial_state() ->
     #server_st{
@@ -39,6 +35,8 @@ initial_state() ->
         nicks = #{}
     }.
 
+% Handles join on server level
+% Calls on handle_channel when Pid is created
 handle(St, {join, Channel, ClientPid}) ->
     case lists:keyfind(Channel, 1, St#server_st.channels) of
         false ->
@@ -48,19 +46,25 @@ handle(St, {join, Channel, ClientPid}) ->
         {Channel, ChannelPid} ->
             genserver:request(ChannelPid, {join, ClientPid}),
             {reply, ok, St}
-    end.
+    end;
 
+% To return all channels associated with a server
+handle(St, active_channels) ->
+    {reply, St#server_st.channels, St}.
 
+% Adds user to the channels user list
 handle_channel(St, {join, ClientPid}) ->
     CurrentUsers = St#channel_st.users,
     NewUsers = [ClientPid | CurrentUsers],
     {reply, ok, St#channel_st{users = NewUsers}};
 
+% Removes user from the list och users for a channel
 handle_channel(St, {leave, ClientPid}) -> 
     CurrentUsers = St#channel_st.users,
     NewUsers = lists:filter(fun(Pid) -> Pid =/= ClientPid end, CurrentUsers),
     {reply, ok, St#channel_st{users = NewUsers}};
 
+% Sends the message to all users in the channel
 handle_channel(St, {message_send, Channel, Msg, Nick, ClientPid}) ->
     CurrentUsers = St#channel_st.users,
     TargetUsers = lists:filter(fun(Pid) -> Pid =/= ClientPid end, CurrentUsers),
