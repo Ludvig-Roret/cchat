@@ -6,7 +6,8 @@
 -record(client_st, {
     gui, % atom of the GUI process
     nick, % nick/username of the client
-    server % atom of the chat server
+    server, % atom of the chat server
+    channels % channels entered
 }).
 
 % Return an initial state record. This is called from GUI.
@@ -15,7 +16,8 @@ initial_state(Nick, GUIAtom, ServerAtom) ->
     #client_st{
         gui = GUIAtom,
         nick = Nick,
-        server = ServerAtom
+        server = ServerAtom,
+        channels = []
     }.
 
 % handle/2 handles each kind of request from GUI
@@ -29,23 +31,57 @@ initial_state(Nick, GUIAtom, ServerAtom) ->
 % Join channel
 handle(St, {join, Channel}) ->
     % TODO: Implement this function
-    genserver:request(St#client_st.server, {join, Channel, self(), St#client_st.gui}) ,
-    {reply, ok, St};
-    % {reply, {error, not_implemented, "join not implemented"}, St} ;
+    case whereis(St#client_st.server) of
+        undefined ->
+            {reply, {error, server_not_reached, "Server doesn't exist"}, St};
+        _ -> 
+    
+    case lists:member(Channel, St#client_st.channels) of
+        true -> {reply, {error, user_already_joined, "User already joined"}, St};
+        false ->
+            try genserver:request(St#client_st.server, {join, Channel, self()}) of
+                ok ->
+                    NewState = St#client_st{channels = [Channel | St#client_st.channels]}, 
+                    {reply, ok, NewState}
+            catch
+                throw : timeout_error -> {reply, {error, server_not_reached, "Server not responding"}, St}
+            end
+        end
+    end;
 
 % Leave channel
 handle(St, {leave, Channel}) ->
     % TODO: Implement this function
-    genserver:request(St#client_st.server, {leave, Channel, St}) ,
-    {reply, ok, self()};
-    % {reply, {error, not_implemented, "leave not implemented"}, St} ;
+
+    case lists:member(Channel, St#client_st.channels) of
+        true ->            
+            genserver:request(list_to_atom(Channel), {leave, self()}) ,
+            NewChannels = St#client_st.channels,
+
+            NewState = St#client_st{channels = lists:filter(fun(Ch) -> Ch =/= Channel end, NewChannels)}, 
+            {reply, ok, NewState};
+        false ->
+            {reply, {error, user_not_joined, "User not joined in channel"}, St}
+    end;
 
 % Sending message (from GUI, to channel)
 handle(St, {message_send, Channel, Msg}) ->
     % TODO: Implement this function
-    genserver:request(St#client_st.server, {message_send, Channel, Msg, St#client_st.nick, self()}) ,
-    {reply, ok, St};
-    % {reply, {error, not_implemented, "message sending not implemented"}, St} ;
+    case whereis(list_to_atom(Channel)) of
+        undefined ->
+             {reply, {error, server_not_reached, "Channel isn't created"}, St};
+        _ ->
+            case lists:member(Channel, St#client_st.channels) of
+                true ->
+                    try genserver:request(list_to_atom(Channel), {message_send, Channel, Msg, St#client_st.nick, self()}) of
+                        ok -> {reply, ok, St}
+                    catch
+                        throw : timeout_error -> {reply, {error, server_not_reached, "Server not responding"}, St}
+                    end;
+                false ->
+                    {reply, {error, user_not_joined, "User not joined in channel"}, St}
+        end
+    end;
 
 % This case is only relevant for the distinction assignment!
 % Change nick (no check, local only)

@@ -6,6 +6,10 @@
    nicks
 }).
 
+-record(channel_st, {
+    users
+}).
+
 % Start a new server process with the given name
 % Do not change the signature of this function.
 start(ServerAtom) ->
@@ -20,48 +24,67 @@ start(ServerAtom) ->
 stop(ServerAtom) ->
     % TODO Implement function
     % Return ok
+    Channels = active_channels(ServerAtom),
+    lists:foreach(fun({_, Pid}) -> genserver:stop(Pid) end, Channels),
     genserver:stop(ServerAtom),
     ok.
 
+active_channels(St) ->
+    Channels = St#server_st.channels,
+    Channels.
+
 initial_state() ->
     #server_st{
-        channels = #{},
+        channels = [],
         nicks = #{}
     }.
 
-handle(St, {join, Channel, ClientPid, Gui}) ->
-    CurrentPids = maps:get(Channel, St#server_st.channels, []),
-    NewPids = maps:put(Channel, [{ClientPid , Gui}| CurrentPids], St#server_st.channels),
-    {reply, ok, St#server_st{channels = NewPids}};
+handle(St, {join, Channel, ClientPid}) ->
+    case lists:keyfind(Channel, 1, St#server_st.channels) of
+        false ->
+            ChannelPid = genserver:start(list_to_atom(Channel), #channel_st{users = []}, fun handle_channel/2),
+            Reply = genserver:request(ChannelPid, {join, ClientPid}),
+            {reply, Reply, St#server_st{channels = [{Channel, ChannelPid} | St#server_st.channels]}};
+        {Channel, ChannelPid} ->
+            genserver:request(ChannelPid, {join, ClientPid}),
+            {reply, ok, St}
+    end.
 
-handle(St, {leave, Channel, ClientPid}) -> 
-    CurrentPids = maps:get(Channel, St#server_st.channels, []),
-    NewList = lists:filter(fun({Pid, _}) -> Pid =/= ClientPid end, CurrentPids),
-    NewPids = maps:put(Channel, NewList, St#server_st.channels),
-    {reply, ok, St#server_st{channels = NewPids}};
 
+handle_channel(St, {join, ClientPid}) ->
+    CurrentUsers = St#channel_st.users,
+    NewUsers = [ClientPid | CurrentUsers],
+    {reply, ok, St#channel_st{users = NewUsers}};
 
-handle(St, {message_send, Channel, Msg, Nick, ClientPid}) ->
-    CurrentPids = maps:get(Channel, St#server_st.channels, []),
-    TargetPids = lists:filter(fun({Pid, _}) -> Pid =/= ClientPid end, CurrentPids),
-    lists:foreach(fun({Pid, _}) -> 
+handle_channel(St, {leave, ClientPid}) -> 
+    CurrentUsers = St#channel_st.users,
+    NewUsers = lists:filter(fun(Pid) -> Pid =/= ClientPid end, CurrentUsers),
+    {reply, ok, St#channel_st{users = NewUsers}};
+
+handle_channel(St, {message_send, Channel, Msg, Nick, ClientPid}) ->
+    CurrentUsers = St#channel_st.users,
+    TargetUsers = lists:filter(fun(Pid) -> Pid =/= ClientPid end, CurrentUsers),
+    lists:foreach(fun(Pid) -> 
         spawn(fun() -> genserver:request(Pid, {message_receive, Channel, Nick, Msg}) end)
-    end, TargetPids),
-    {reply, ok, St};
+    end, TargetUsers),
+    {reply, ok, St}.
+
+
+    
 
 
 %  Distinction assignment
 
-handle(St, {nick, NewNick, ClientPid}) ->
-    CurrentNicks = maps:get(NewNick, St#server_st.nicks, []),
-    NewNicks = #{},
-    if
-        length(CurrentNicks) >= 1 ->
-            {reply, {error, nick_taken, "That nick is already in use"}, St};
+% handle(St, {nick, NewNick, ClientPid}) ->
+%     CurrentNicks = maps:get(NewNick, St#server_st.nicks, []),
+%     NewNicks = #{},
+%     if
+%         length(CurrentNicks) >= 1 ->
+%             {reply, {error, nick_taken, "That nick is already in use"}, St};
 
-        true ->
-            NewNicks = maps:put(NewNick, [ClientPid | CurrentNicks], St#server_st.nicks)
-    end,
-    {reply, ok, St#server_st{nicks = NewNicks}}.
+%         true ->
+%             NewNicks = maps:put(NewNick, [ClientPid | CurrentNicks], St#server_st.nicks)
+%     end,
+%     {reply, ok, St#server_st{nicks = NewNicks}}.
     
     
